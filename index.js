@@ -19,7 +19,7 @@ class SensiboPlatform {
     this.apiKey = config.apiKey;
     this.baseURL = 'https://home.sensibo.com/api/v2';
     this.accessories = [];
-    this.pollingInterval = config.pollingInterval || 30000;
+    this.pollingInterval = config.pollingInterval || 120000; // Default 2 minutes
     this.debug = config.debug || false;
     
     if (!this.apiKey) {
@@ -71,21 +71,49 @@ class SensiboPlatform {
   
   startPolling() {
     this.log.info(`Starting polling every ${this.pollingInterval}ms`);
-    setInterval(() => {
+    
+    // Only start polling if we have accessories
+    if (this.accessories.length === 0) {
+      this.log.warn('No accessories found, skipping polling setup');
+      return;
+    }
+    
+    // Single polling timer for all devices
+    this.pollingTimer = setInterval(() => {
       this.updateAllDevices();
     }, this.pollingInterval);
     
-    // Initial update
-    setTimeout(() => this.updateAllDevices(), 5000);
+    // Initial update after 10 seconds
+    setTimeout(() => this.updateAllDevices(), 10000);
   }
   
   async updateAllDevices() {
-    if (this.debug) this.log.info('Polling all devices for updates...');
+    if (this.isUpdating) {
+      if (this.debug) this.log.info('Update already in progress, skipping...');
+      return;
+    }
     
-    for (const accessory of this.accessories) {
-      if (accessory.sensiboAccessory) {
-        await accessory.sensiboAccessory.updateDeviceState();
+    this.isUpdating = true;
+    
+    try {
+      if (this.debug) this.log.info('Polling all devices for updates...');
+      
+      // Update devices sequentially with delay to avoid rate limiting
+      for (let i = 0; i < this.accessories.length; i++) {
+        const accessory = this.accessories[i];
+        if (accessory.sensiboAccessory) {
+          await accessory.sensiboAccessory.updateDeviceState();
+          
+          // Add delay between device updates to respect rate limits
+          if (i < this.accessories.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
       }
+    } catch (error) {
+      this.log.error('Error during polling update:', error.message);
+    } finally {
+      this.isUpdating = false;
     }
   }
   
