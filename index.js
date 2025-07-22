@@ -138,12 +138,12 @@ class SensiboAccessory {
     // Store reference for polling
     this.accessory.sensiboAccessory = this;
     
-    // Current state
-    this.currentTemperature = device.measurements?.temperature || 20;
-    this.targetTemperature = device.acState?.targetTemperature || 20;
+    // Current state with HomeKit validation
+    this.currentTemperature = this.validateTemperature(device.measurements?.temperature, 20);
+    this.targetTemperature = this.validateTargetTemperature(device.acState?.targetTemperature, 20);
     this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.OFF;
     this.targetHeatingCoolingState = this.mapACModeToHomeKit(device.acState?.mode || 'off');
-    this.currentRelativeHumidity = device.measurements?.humidity || 50;
+    this.currentRelativeHumidity = Math.max(0, Math.min(100, device.measurements?.humidity || 50));
     
     this.setupServices();
     this.updateDeviceState();
@@ -212,8 +212,8 @@ class SensiboAccessory {
       
       const measurements = measurementsResponse.data.result[0];
       if (measurements) {
-        const newTemp = measurements.temperature || 20;
-        const newHumidity = measurements.humidity || 50;
+        const newTemp = this.validateTemperature(measurements.temperature, 20);
+        const newHumidity = Math.max(0, Math.min(100, measurements.humidity || 50));
         
         if (Math.abs(this.currentTemperature - newTemp) > 0.1) {
           this.currentTemperature = newTemp;
@@ -241,7 +241,7 @@ class SensiboAccessory {
       
       const acState = acStateResponse.data.result[0]?.acState;
       if (acState) {
-        const newTargetTemp = acState.targetTemperature || 20;
+        const newTargetTemp = this.validateTargetTemperature(acState.targetTemperature, 20);
         if (this.targetTemperature !== newTargetTemp) {
           this.targetTemperature = newTargetTemp;
           this.thermostatService.getCharacteristic(Characteristic.TargetTemperature)
@@ -307,6 +307,24 @@ class SensiboAccessory {
       case 'auto': return Characteristic.TargetHeatingCoolingState.AUTO;
       default: return Characteristic.TargetHeatingCoolingState.OFF;
     }
+  }
+  
+  validateTemperature(temp, defaultValue = 20) {
+    // Current temperature can be any reasonable value
+    if (temp === null || temp === undefined || isNaN(temp)) {
+      return defaultValue;
+    }
+    // Clamp to reasonable range for current temperature
+    return Math.max(-40, Math.min(100, temp));
+  }
+  
+  validateTargetTemperature(temp, defaultValue = 20) {
+    // Target temperature must be within HomeKit's range (16-30°C)
+    if (temp === null || temp === undefined || isNaN(temp)) {
+      return defaultValue;
+    }
+    // Clamp to HomeKit's acceptable range
+    return Math.max(16, Math.min(30, temp));
   }
   
   // Characteristic handlers
