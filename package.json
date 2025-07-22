@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "homebridge -D -U ~/.homebridge-dev",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test.js",
+    "test-homekit": "node test-homekit.js",
+    "link": "sudo npm link"
   },
   "keywords": [
     "homebridge-plugin",
