@@ -1,2 +1,5 @@
 .env
 node_modules
+index-complex.js
+index-simple.js
+.homebridge-test
