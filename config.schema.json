@@ -1,0 +1,35 @@
+{
+  "pluginAlias": "SensiboCustom",
+  "pluginType": "platform",
+  "singular": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "Sensibo Custom",
+        "required": true
+      },
+      "apiKey": {
+        "title": "API Key",
+        "type": "string",
+        "required": true,
+        "description": "Your Sensibo API key from https://home.sensibo.com/me/api"
+      },
+      "pollingInterval": {
+        "title": "Polling Interval (seconds)",
+        "type": "integer",
+        "default": 30,
+        "minimum": 10,
+        "maximum": 300,
+        "description": "How often to check for device updates"
+      },
+      "debug": {
+        "title": "Enable Debug Logging",
+        "type": "boolean",
+        "default": false
+      }
+    }
+  }
+}

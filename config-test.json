@@ -1,0 +1,18 @@
+{
+  "bridge": {
+    "name": "Homebridge Sensibo Test",
+    "username": "CC:22:3D:E3:CE:30",
+    "port": 51826,
+    "pin": "031-45-154"
+  },
+  "description": "Test configuration for Sensibo plugin",
+  "platforms": [
+    {
+      "platform": "SensiboCustom",
+      "name": "Sensibo Custom",
+      "apiKey": "4SuGU45jABnZESmnuKiuci4XUe331s",
+      "pollingInterval": 30,
+      "debug": true
+    }
+  ]
+}
