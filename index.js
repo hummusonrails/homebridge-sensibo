@@ -56,8 +56,25 @@ class SensiboPlatform {
       
       devices.forEach(device => {
         this.log.info(`Adding device: ${device.room.name} (${device.id})`);
-        const accessory = new SensiboAccessory(this.log, device, this.apiKey, this.baseURL);
-        this.accessories.push(accessory);
+        
+        // Create UUID for this accessory
+        const uuid = this.api.hap.uuid.generate(device.id);
+        
+        // Check if accessory already exists
+        const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
+        
+        if (existingAccessory) {
+          this.log.info(`Restoring existing accessory: ${device.room.name}`);
+          new SensiboAccessory(this, existingAccessory, device);
+        } else {
+          this.log.info(`Adding new accessory: ${device.room.name}`);
+          const accessory = new this.api.platformAccessory(device.room.name, uuid);
+          accessory.context.device = device;
+          
+          new SensiboAccessory(this, accessory, device);
+          
+          this.api.registerPlatformAccessories('homebridge-sensibo-custom', 'SensiboCustom', [accessory]);
+        }
       });
       
     } catch (error) {
@@ -68,27 +85,33 @@ class SensiboPlatform {
   configureAccessory(accessory) {
     // This is called when cached accessories are loaded
     this.log.info('Loading accessory from cache:', accessory.displayName);
-  }
-  
-  accessories(callback) {
-    callback(this.accessories);
+    this.accessories.push(accessory);
   }
 }
 
 class SensiboAccessory {
-  constructor(log, device, apiKey, baseURL) {
-    this.log = log;
-    this.device = device;
-    this.apiKey = apiKey;
-    this.baseURL = baseURL;
-    this.deviceId = device.id;
-    this.name = device.room.name;
+  constructor(platform, accessory, device) {
+    this.platform = platform;
+    this.accessory = accessory;
+    this.device = device || accessory.context.device;
+    this.log = platform.log;
+    this.apiKey = platform.apiKey;
+    this.baseURL = platform.baseURL;
+    this.deviceId = this.device.id;
+    this.name = this.device.room.name;
+    
+    // Set accessory information
+    this.accessory.getService(this.platform.api.hap.Service.AccessoryInformation)
+      .setCharacteristic(this.platform.api.hap.Characteristic.Manufacturer, 'Sensibo')
+      .setCharacteristic(this.platform.api.hap.Characteristic.Model, this.device.productModel || 'Sensibo Sky')
+      .setCharacteristic(this.platform.api.hap.Characteristic.SerialNumber, this.deviceId)
+      .setCharacteristic(this.platform.api.hap.Characteristic.FirmwareRevision, this.device.firmwareVersion || '1.0.0');
     
     // Current state
     this.currentTemperature = 20;
     this.targetTemperature = 20;
-    this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.OFF;
-    this.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.OFF;
+    this.currentHeatingCoolingState = this.platform.api.hap.Characteristic.CurrentHeatingCoolingState.OFF;
+    this.targetHeatingCoolingState = this.platform.api.hap.Characteristic.TargetHeatingCoolingState.OFF;
     this.currentRelativeHumidity = 50;
     
     this.setupServices();
@@ -101,32 +124,25 @@ class SensiboAccessory {
   }
   
   setupServices() {
-    // Information Service
-    this.informationService = new Service.AccessoryInformation();
-    this.informationService
-      .setCharacteristic(Characteristic.Manufacturer, 'Sensibo')
-      .setCharacteristic(Characteristic.Model, this.device.productModel || 'Sensibo Sky')
-      .setCharacteristic(Characteristic.SerialNumber, this.deviceId)
-      .setCharacteristic(Characteristic.FirmwareRevision, this.device.firmwareVersion || '1.0.0');
-    
-    // Thermostat Service
-    this.thermostatService = new Service.Thermostat(this.name);
+    // Get or create Thermostat Service
+    this.thermostatService = this.accessory.getService(this.platform.api.hap.Service.Thermostat) ||
+      this.accessory.addService(this.platform.api.hap.Service.Thermostat);
     
     this.thermostatService
-      .getCharacteristic(Characteristic.CurrentHeatingCoolingState)
+      .getCharacteristic(this.platform.api.hap.Characteristic.CurrentHeatingCoolingState)
       .on('get', this.getCurrentHeatingCoolingState.bind(this));
     
     this.thermostatService
-      .getCharacteristic(Characteristic.TargetHeatingCoolingState)
+      .getCharacteristic(this.platform.api.hap.Characteristic.TargetHeatingCoolingState)
       .on('get', this.getTargetHeatingCoolingState.bind(this))
       .on('set', this.setTargetHeatingCoolingState.bind(this));
     
     this.thermostatService
-      .getCharacteristic(Characteristic.CurrentTemperature)
+      .getCharacteristic(this.platform.api.hap.Characteristic.CurrentTemperature)
       .on('get', this.getCurrentTemperature.bind(this));
     
     this.thermostatService
-      .getCharacteristic(Characteristic.TargetTemperature)
+      .getCharacteristic(this.platform.api.hap.Characteristic.TargetTemperature)
       .on('get', this.getTargetTemperature.bind(this))
       .on('set', this.setTargetTemperature.bind(this))
       .setProps({
@@ -136,13 +152,15 @@ class SensiboAccessory {
       });
     
     this.thermostatService
-      .getCharacteristic(Characteristic.TemperatureDisplayUnits)
+      .getCharacteristic(this.platform.api.hap.Characteristic.TemperatureDisplayUnits)
       .on('get', this.getTemperatureDisplayUnits.bind(this));
     
-    // Humidity Sensor Service
-    this.humidityService = new Service.HumiditySensor(`${this.name} Humidity`);
+    // Get or create Humidity Sensor Service
+    this.humidityService = this.accessory.getService(this.platform.api.hap.Service.HumiditySensor) ||
+      this.accessory.addService(this.platform.api.hap.Service.HumiditySensor, `${this.name} Humidity`);
+    
     this.humidityService
-      .getCharacteristic(Characteristic.CurrentRelativeHumidity)
+      .getCharacteristic(this.platform.api.hap.Characteristic.CurrentRelativeHumidity)
       .on('get', this.getCurrentRelativeHumidity.bind(this));
   }
   
@@ -176,40 +194,40 @@ class SensiboAccessory {
         if (acState.on) {
           switch (acState.mode) {
             case 'cool':
-              this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.COOL;
-              this.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.COOL;
+              this.currentHeatingCoolingState = this.platform.api.hap.Characteristic.CurrentHeatingCoolingState.COOL;
+              this.targetHeatingCoolingState = this.platform.api.hap.Characteristic.TargetHeatingCoolingState.COOL;
               break;
             case 'heat':
-              this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.HEAT;
-              this.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.HEAT;
+              this.currentHeatingCoolingState = this.platform.api.hap.Characteristic.CurrentHeatingCoolingState.HEAT;
+              this.targetHeatingCoolingState = this.platform.api.hap.Characteristic.TargetHeatingCoolingState.HEAT;
               break;
             case 'auto':
-              this.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.AUTO;
+              this.targetHeatingCoolingState = this.platform.api.hap.Characteristic.TargetHeatingCoolingState.AUTO;
               // Determine current state based on temperature difference
               if (this.currentTemperature < this.targetTemperature - 1) {
-                this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.HEAT;
+                this.currentHeatingCoolingState = this.platform.api.hap.Characteristic.CurrentHeatingCoolingState.HEAT;
               } else if (this.currentTemperature > this.targetTemperature + 1) {
-                this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.COOL;
+                this.currentHeatingCoolingState = this.platform.api.hap.Characteristic.CurrentHeatingCoolingState.COOL;
               } else {
-                this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.OFF;
+                this.currentHeatingCoolingState = this.platform.api.hap.Characteristic.CurrentHeatingCoolingState.OFF;
               }
               break;
             default:
-              this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.OFF;
-              this.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.OFF;
+              this.currentHeatingCoolingState = this.platform.api.hap.Characteristic.CurrentHeatingCoolingState.OFF;
+              this.targetHeatingCoolingState = this.platform.api.hap.Characteristic.TargetHeatingCoolingState.OFF;
           }
         } else {
-          this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.OFF;
-          this.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.OFF;
+          this.currentHeatingCoolingState = this.platform.api.hap.Characteristic.CurrentHeatingCoolingState.OFF;
+          this.targetHeatingCoolingState = this.platform.api.hap.Characteristic.TargetHeatingCoolingState.OFF;
         }
       }
       
       // Update characteristics
-      this.thermostatService.updateCharacteristic(Characteristic.CurrentTemperature, this.currentTemperature);
-      this.thermostatService.updateCharacteristic(Characteristic.TargetTemperature, this.targetTemperature);
-      this.thermostatService.updateCharacteristic(Characteristic.CurrentHeatingCoolingState, this.currentHeatingCoolingState);
-      this.thermostatService.updateCharacteristic(Characteristic.TargetHeatingCoolingState, this.targetHeatingCoolingState);
-      this.humidityService.updateCharacteristic(Characteristic.CurrentRelativeHumidity, this.currentRelativeHumidity);
+      this.thermostatService.updateCharacteristic(this.platform.api.hap.Characteristic.CurrentTemperature, this.currentTemperature);
+      this.thermostatService.updateCharacteristic(this.platform.api.hap.Characteristic.TargetTemperature, this.targetTemperature);
+      this.thermostatService.updateCharacteristic(this.platform.api.hap.Characteristic.CurrentHeatingCoolingState, this.currentHeatingCoolingState);
+      this.thermostatService.updateCharacteristic(this.platform.api.hap.Characteristic.TargetHeatingCoolingState, this.targetHeatingCoolingState);
+      this.humidityService.updateCharacteristic(this.platform.api.hap.Characteristic.CurrentRelativeHumidity, this.currentRelativeHumidity);
       
     } catch (error) {
       this.log.error(`Error updating device state for ${this.name}:`, error.message);
@@ -249,20 +267,20 @@ class SensiboAccessory {
       let acState = {};
       
       switch (value) {
-        case Characteristic.TargetHeatingCoolingState.OFF:
+        case this.platform.api.hap.Characteristic.TargetHeatingCoolingState.OFF:
           acState.on = false;
           break;
-        case Characteristic.TargetHeatingCoolingState.HEAT:
+        case this.platform.api.hap.Characteristic.TargetHeatingCoolingState.HEAT:
           acState.on = true;
           acState.mode = 'heat';
           acState.targetTemperature = this.targetTemperature;
           break;
-        case Characteristic.TargetHeatingCoolingState.COOL:
+        case this.platform.api.hap.Characteristic.TargetHeatingCoolingState.COOL:
           acState.on = true;
           acState.mode = 'cool';
           acState.targetTemperature = this.targetTemperature;
           break;
-        case Characteristic.TargetHeatingCoolingState.AUTO:
+        case this.platform.api.hap.Characteristic.TargetHeatingCoolingState.AUTO:
           acState.on = true;
           acState.mode = 'auto';
           acState.targetTemperature = this.targetTemperature;
@@ -292,7 +310,7 @@ class SensiboAccessory {
       };
       
       // Only send command if AC is on
-      if (this.targetHeatingCoolingState !== Characteristic.TargetHeatingCoolingState.OFF) {
+      if (this.targetHeatingCoolingState !== this.platform.api.hap.Characteristic.TargetHeatingCoolingState.OFF) {
         await this.sendACCommand(acState);
       }
       
@@ -304,14 +322,10 @@ class SensiboAccessory {
   }
   
   getTemperatureDisplayUnits(callback) {
-    callback(null, Characteristic.TemperatureDisplayUnits.CELSIUS);
+    callback(null, this.platform.api.hap.Characteristic.TemperatureDisplayUnits.CELSIUS);
   }
   
   getCurrentRelativeHumidity(callback) {
     callback(null, this.currentRelativeHumidity);
-  }
-  
-  getServices() {
-    return [this.informationService, this.thermostatService, this.humidityService];
   }
 }
