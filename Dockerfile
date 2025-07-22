@@ -9,8 +9,7 @@ RUN apk add --no-cache \
     python3 \
     make \
     g++ \
-    avahi-compat-libdns_sd \
-    avahi-dev
+    curl
 
 # Copy package files
 COPY package*.json ./
@@ -21,17 +20,8 @@ RUN npm ci --only=production
 # Copy plugin files
 COPY . .
 
-# Create homebridge user and directories
-RUN addgroup -g 1000 homebridge && \
-    adduser -u 1000 -G homebridge -s /bin/sh -D homebridge && \
-    mkdir -p /home/homebridge/.homebridge && \
-    chown -R homebridge:homebridge /home/homebridge
-
-# Switch to homebridge user
-USER homebridge
-
-# Create default config directory
-RUN mkdir -p /home/homebridge/.homebridge
+# Create homebridge config directory
+RUN mkdir -p ~/.homebridge
 
 # Expose Homebridge port
 EXPOSE 51826
@@ -40,5 +30,5 @@ EXPOSE 51826
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:51826/ || exit 1
 
-# Start Homebridge
-CMD ["homebridge", "-I", "-U", "/home/homebridge/.homebridge"]
+# Generate config from environment and start Homebridge
+CMD ["sh", "-c", "node setup.js && homebridge -I -U ~/.homebridge"]
