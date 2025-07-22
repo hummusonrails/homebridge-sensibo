@@ -1,17 +1,17 @@
 {
   "bridge": {
-    "name": "Homebridge",
+    "name": "Homebridge Sensibo",
     "username": "CC:22:3D:E3:CE:30",
     "port": 51826,
     "pin": "031-45-154"
   },
-  "description": "Homebridge configuration for Sensibo devices",
+  "description": "Homebridge configuration for custom Sensibo plugin",
   "platforms": [
     {
       "platform": "SensiboCustom",
       "name": "Sensibo Custom",
       "apiKey": "YOUR_SENSIBO_API_KEY_HERE",
-      "pollingInterval": 30,
+      "pollingInterval": 300000,
       "debug": false
     }
   ]

@@ -1,6 +1,19 @@
 # Homebridge Sensibo Custom Plugin
 
+<div align="center">
+  <img src="image.png" alt="Homebridge Sensibo Custom Plugin" width="20%">
+</div>
+
 A custom Homebridge plugin to control Sensibo air conditioning devices through Apple HomeKit. This plugin allows you to control your Sensibo devices using Siri, the Home app, and other HomeKit-compatible applications.
+
+## Acknowledgments
+
+This plugin was inspired by and builds upon the excellent work of the [homebridge-sensibo-ac](https://github.com/nitaybz/homebridge-sensibo-ac) plugin.
+
+**Key differences from the original plugin:**
+- Simplified configuration for specific use cases
+- Custom polling and error handling optimizations
+- More logging and debugging capabilities
 
 ## ⚠️ Important: Local Network Deployment Required
 
@@ -230,6 +243,19 @@ The Sensibo API has rate limits. This plugin:
 3. Make your changes
 4. Test thoroughly
 5. Submit a pull request
+
+## Related Projects
+
+- [homebridge-sensibo-ac](https://github.com/nitaybz/homebridge-sensibo-ac) - The original and more feature-rich Sensibo plugin
+- [Homebridge](https://homebridge.io/) - The bridge that enables HomeKit support for non-HomeKit devices
+- [Sensibo API](https://sensibo.github.io/) - Official Sensibo API documentation
+
+## Support
+
+If you encounter issues:
+1. Check the [Homebridge logs](https://github.com/homebridge/homebridge/wiki/Troubleshooting) for error messages
+2. Verify your Sensibo API key and device connectivity
+3. Consider trying the original [homebridge-sensibo-ac](https://github.com/nitaybz/homebridge-sensibo-ac) plugin if you need more advanced features
 
 ## License
 
