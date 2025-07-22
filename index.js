@@ -19,7 +19,7 @@ class SensiboPlatform {
     this.apiKey = config.apiKey;
     this.baseURL = 'https://home.sensibo.com/api/v2';
     this.accessories = [];
-    this.pollingInterval = config.pollingInterval || 120000; // Default 2 minutes
+    this.pollingInterval = config.pollingInterval || 300000; // Default 5 minutes
     this.debug = config.debug || false;
     
     if (!this.apiKey) {
@@ -89,14 +89,13 @@ class SensiboPlatform {
   
   async updateAllDevices() {
     if (this.isUpdating) {
-      if (this.debug) this.log.info('Update already in progress, skipping...');
-      return;
+      return; // Skip silently if update in progress
     }
     
     this.isUpdating = true;
     
     try {
-      if (this.debug) this.log.info('Polling all devices for updates...');
+      this.log.info('Updating all Sensibo devices...');
       
       // Update devices sequentially with delay to avoid rate limiting
       for (let i = 0; i < this.accessories.length; i++) {
@@ -106,10 +105,12 @@ class SensiboPlatform {
           
           // Add delay between device updates to respect rate limits
           if (i < this.accessories.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 3000));
           }
         }
       }
+      
+      this.log.info('Device update completed');
     } catch (error) {
       this.log.error('Error during polling update:', error.message);
     } finally {
@@ -310,10 +311,12 @@ class SensiboAccessory {
   
   // Characteristic handlers
   getCurrentHeatingCoolingState() {
+    this.log.info(`${this.name}: getCurrentHeatingCoolingState called, returning ${this.currentHeatingCoolingState}`);
     return this.currentHeatingCoolingState;
   }
   
   getTargetHeatingCoolingState() {
+    this.log.info(`${this.name}: getTargetHeatingCoolingState called, returning ${this.targetHeatingCoolingState}`);
     return this.targetHeatingCoolingState;
   }
   
@@ -355,10 +358,12 @@ class SensiboAccessory {
   }
   
   getCurrentTemperature() {
+    this.log.info(`${this.name}: getCurrentTemperature called, returning ${this.currentTemperature}°C`);
     return this.currentTemperature;
   }
   
   getTargetTemperature() {
+    this.log.info(`${this.name}: getTargetTemperature called, returning ${this.targetTemperature}°C`);
     return this.targetTemperature;
   }
   
@@ -386,6 +391,7 @@ class SensiboAccessory {
   }
   
   getCurrentRelativeHumidity() {
+    this.log.info(`${this.name}: getCurrentRelativeHumidity called, returning ${this.currentRelativeHumidity}%`);
     return this.currentRelativeHumidity;
   }
   
