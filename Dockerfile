@@ -1,5 +1,5 @@
-# Use Node.js latest stable version
-FROM node:24-alpine
+# Use Node.js v22 (latest supported by Homebridge)
+FROM node:22-alpine
 
 # Set working directory
 WORKDIR /app
@@ -31,4 +31,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:51826/ || exit 1
 
 # Generate config from environment and start Homebridge
-CMD ["sh", "-c", "node setup.js && homebridge -I -U ~/.homebridge"]
+CMD ["sh", "-c", "node setup.js && npx homebridge -I -U ~/.homebridge"]

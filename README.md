@@ -16,7 +16,7 @@ A custom Homebridge plugin for controlling Sensibo smart air conditioner devices
 
 ### Prerequisites
 
-- Node.js 20.0.0 or higher (tested with Node.js v24)
+- Node.js 18.15.0 or higher
 - Homebridge 1.3.0 or higher
 - Sensibo API key (get yours from [https://home.sensibo.com/me/api](https://home.sensibo.com/me/api))
 
