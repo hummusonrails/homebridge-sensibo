@@ -138,12 +138,12 @@ class SensiboAccessory {
     // Store reference for polling
     this.accessory.sensiboAccessory = this;
     
-    // Current state with HomeKit validation
-    this.currentTemperature = this.validateTemperature(device.measurements?.temperature, 20);
-    this.targetTemperature = this.validateTargetTemperature(device.acState?.targetTemperature, 20);
+    // Current state - read-only from Sensibo
+    this.currentTemperature = device.measurements?.temperature || 20;
+    this.targetTemperature = Math.max(16, Math.min(30, device.acState?.targetTemperature || 20)); // Only clamp for HomeKit display
     this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.OFF;
     this.targetHeatingCoolingState = this.mapACModeToHomeKit(device.acState?.mode || 'off');
-    this.currentRelativeHumidity = Math.max(0, Math.min(100, device.measurements?.humidity || 50));
+    this.currentRelativeHumidity = device.measurements?.humidity || 50;
     
     this.setupServices();
     this.updateDeviceState();
@@ -212,8 +212,9 @@ class SensiboAccessory {
       
       const measurements = measurementsResponse.data.result[0];
       if (measurements) {
-        const newTemp = this.validateTemperature(measurements.temperature, 20);
-        const newHumidity = Math.max(0, Math.min(100, measurements.humidity || 50));
+        // Read-only: just display current state from Sensibo
+        const newTemp = measurements.temperature || 20;
+        const newHumidity = measurements.humidity || 50;
         
         if (Math.abs(this.currentTemperature - newTemp) > 0.1) {
           this.currentTemperature = newTemp;
@@ -241,12 +242,21 @@ class SensiboAccessory {
       
       const acState = acStateResponse.data.result[0]?.acState;
       if (acState) {
-        const newTargetTemp = this.validateTargetTemperature(acState.targetTemperature, 20);
+        // Read-only: display actual Sensibo target temp (clamped only for HomeKit compatibility)
+        const actualTargetTemp = acState.targetTemperature || 20;
+        const newTargetTemp = Math.max(16, Math.min(30, actualTargetTemp)); // Only clamp for HomeKit display
+        
         if (this.targetTemperature !== newTargetTemp) {
           this.targetTemperature = newTargetTemp;
           this.thermostatService.getCharacteristic(Characteristic.TargetTemperature)
             .updateValue(this.targetTemperature);
-          if (this.platform.debug) this.log.info(`${this.name}: Target temperature updated to ${this.targetTemperature}°C`);
+          if (this.platform.debug) {
+            if (actualTargetTemp !== newTargetTemp) {
+              this.log.info(`${this.name}: Target temperature ${actualTargetTemp}°C clamped to ${this.targetTemperature}°C for HomeKit`);
+            } else {
+              this.log.info(`${this.name}: Target temperature updated to ${this.targetTemperature}°C`);
+            }
+          }
         }
         
         let newCurrentState, newTargetState;
