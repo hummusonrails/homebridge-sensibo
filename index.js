@@ -18,78 +18,113 @@ class SensiboPlatform {
     
     this.apiKey = config.apiKey;
     this.baseURL = 'https://home.sensibo.com/api/v2';
-    this.foundAccessories = [];
+    this.accessories = [];
+    this.pollingInterval = config.pollingInterval || 30000;
+    this.debug = config.debug || false;
     
     if (!this.apiKey) {
       this.log.error('API Key is required. Get yours from https://home.sensibo.com/me/api');
       return;
     }
+    
+    if (api) {
+      this.api.on('didFinishLaunching', this.didFinishLaunching.bind(this));
+    }
   }
   
-  accessories(callback) {
-    this.log.info('Fetching Sensibo devices...');
-    
-    axios.get(`${this.baseURL}/users/me/pods`, {
-      params: {
-        apiKey: this.apiKey,
-        fields: '*'
-      },
-      headers: {
-        'Accept-Encoding': 'gzip'
-      }
-    })
-    .then(response => {
+  async didFinishLaunching() {
+    this.log.info('Sensibo platform finished launching, discovering devices...');
+    await this.discoverDevices();
+    this.startPolling();
+  }
+  
+  async discoverDevices() {
+    try {
+      this.log.info('Fetching Sensibo devices...');
+      const response = await axios.get(`${this.baseURL}/users/me/pods`, {
+        params: {
+          apiKey: this.apiKey,
+          fields: '*'
+        },
+        headers: {
+          'Accept-Encoding': 'gzip'
+        }
+      });
+      
       const devices = response.data.result;
       this.log.info(`Found ${devices.length} Sensibo device(s)`);
       
       devices.forEach(device => {
         this.log.info(`Creating accessory for: ${device.room.name} (${device.id})`);
-        const accessory = new SensiboAccessory(this.log, device, this.apiKey, this.baseURL);
-        this.foundAccessories.push(accessory);
+        const uuid = this.api.hap.uuid.generate(device.id);
+        const accessory = new this.api.platformAccessory(device.room.name, uuid);
+        accessory.context.device = device;
+        
+        new SensiboAccessory(this, accessory, device);
+        this.api.registerPlatformAccessories('homebridge-sensibo-custom', 'SensiboCustom', [accessory]);
+        this.accessories.push(accessory);
       });
-      
-      callback(this.foundAccessories);
-    })
-    .catch(error => {
-      this.log.error('Error fetching devices:', error.message);
-      callback([]);
-    });
+    } catch (error) {
+      this.log.error('Error discovering devices:', error.message);
+    }
+  }
+  
+  startPolling() {
+    this.log.info(`Starting polling every ${this.pollingInterval}ms`);
+    setInterval(() => {
+      this.updateAllDevices();
+    }, this.pollingInterval);
+    
+    // Initial update
+    setTimeout(() => this.updateAllDevices(), 5000);
+  }
+  
+  async updateAllDevices() {
+    if (this.debug) this.log.info('Polling all devices for updates...');
+    
+    for (const accessory of this.accessories) {
+      if (accessory.sensiboAccessory) {
+        await accessory.sensiboAccessory.updateDeviceState();
+      }
+    }
+  }
+  
+  configureAccessory(accessory) {
+    this.log.info('Loading accessory from cache:', accessory.displayName);
+    this.accessories.push(accessory);
   }
 }
 
 class SensiboAccessory {
-  constructor(log, device, apiKey, baseURL) {
-    this.log = log;
+  constructor(platform, accessory, device) {
+    this.platform = platform;
+    this.accessory = accessory;
     this.device = device;
-    this.apiKey = apiKey;
-    this.baseURL = baseURL;
+    this.log = platform.log;
+    this.apiKey = platform.apiKey;
+    this.baseURL = platform.baseURL;
     this.deviceId = device.id;
     this.name = device.room.name;
     
-    // Required accessory properties
-    this.displayName = this.name;
-    this.UUID = this.deviceId;
-    this.category = 20; // Thermostat category
+    // Store reference for polling
+    this.accessory.sensiboAccessory = this;
     
     // Current state
-    this.currentTemperature = 20;
-    this.targetTemperature = 20;
+    this.currentTemperature = device.measurements?.temperature || 20;
+    this.targetTemperature = device.acState?.targetTemperature || 20;
     this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.OFF;
-    this.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.OFF;
-    this.currentRelativeHumidity = 50;
+    this.targetHeatingCoolingState = this.mapACModeToHomeKit(device.acState?.mode || 'off');
+    this.currentRelativeHumidity = device.measurements?.humidity || 50;
     
     this.setupServices();
     this.updateDeviceState();
-    
-    // Poll for updates every 30 seconds
-    setInterval(() => {
-      this.updateDeviceState();
-    }, 30000);
   }
   
   setupServices() {
     // Information Service
-    this.informationService = new Service.AccessoryInformation();
+    this.informationService = this.accessory.getService(Service.AccessoryInformation) ||
+      this.accessory.addService(Service.AccessoryInformation);
+    
     this.informationService
       .setCharacteristic(Characteristic.Manufacturer, 'Sensibo')
       .setCharacteristic(Characteristic.Model, this.device.productModel || 'Sensibo Sky')
@@ -97,25 +132,26 @@ class SensiboAccessory {
       .setCharacteristic(Characteristic.FirmwareRevision, this.device.firmwareVersion || '1.0.0');
     
     // Thermostat Service
-    this.thermostatService = new Service.Thermostat(this.name);
+    this.thermostatService = this.accessory.getService(Service.Thermostat) ||
+      this.accessory.addService(Service.Thermostat, this.name);
     
     this.thermostatService
       .getCharacteristic(Characteristic.CurrentHeatingCoolingState)
-      .on('get', this.getCurrentHeatingCoolingState.bind(this));
+      .onGet(this.getCurrentHeatingCoolingState.bind(this));
     
     this.thermostatService
       .getCharacteristic(Characteristic.TargetHeatingCoolingState)
-      .on('get', this.getTargetHeatingCoolingState.bind(this))
-      .on('set', this.setTargetHeatingCoolingState.bind(this));
+      .onGet(this.getTargetHeatingCoolingState.bind(this))
+      .onSet(this.setTargetHeatingCoolingState.bind(this));
     
     this.thermostatService
       .getCharacteristic(Characteristic.CurrentTemperature)
-      .on('get', this.getCurrentTemperature.bind(this));
+      .onGet(this.getCurrentTemperature.bind(this));
     
     this.thermostatService
       .getCharacteristic(Characteristic.TargetTemperature)
-      .on('get', this.getTargetTemperature.bind(this))
-      .on('set', this.setTargetTemperature.bind(this))
+      .onGet(this.getTargetTemperature.bind(this))
+      .onSet(this.setTargetTemperature.bind(this))
       .setProps({
         minValue: 16,
         maxValue: 30,
@@ -124,17 +160,21 @@ class SensiboAccessory {
     
     this.thermostatService
       .getCharacteristic(Characteristic.TemperatureDisplayUnits)
-      .on('get', this.getTemperatureDisplayUnits.bind(this));
+      .onGet(this.getTemperatureDisplayUnits.bind(this));
     
     // Humidity Sensor Service
-    this.humidityService = new Service.HumiditySensor(`${this.name} Humidity`);
+    this.humidityService = this.accessory.getService(Service.HumiditySensor) ||
+      this.accessory.addService(Service.HumiditySensor, `${this.name} Humidity`);
+    
     this.humidityService
       .getCharacteristic(Characteristic.CurrentRelativeHumidity)
-      .on('get', this.getCurrentRelativeHumidity.bind(this));
+      .onGet(this.getCurrentRelativeHumidity.bind(this));
   }
   
   async updateDeviceState() {
     try {
+      if (this.platform.debug) this.log.info(`Updating device state for ${this.name}`);
+      
       // Get current measurements
       const measurementsResponse = await axios.get(`${this.baseURL}/pods/${this.deviceId}/measurements`, {
         params: { apiKey: this.apiKey },
@@ -143,8 +183,22 @@ class SensiboAccessory {
       
       const measurements = measurementsResponse.data.result[0];
       if (measurements) {
-        this.currentTemperature = measurements.temperature || 20;
-        this.currentRelativeHumidity = measurements.humidity || 50;
+        const newTemp = measurements.temperature || 20;
+        const newHumidity = measurements.humidity || 50;
+        
+        if (Math.abs(this.currentTemperature - newTemp) > 0.1) {
+          this.currentTemperature = newTemp;
+          this.thermostatService.getCharacteristic(Characteristic.CurrentTemperature)
+            .updateValue(this.currentTemperature);
+          if (this.platform.debug) this.log.info(`${this.name}: Temperature updated to ${this.currentTemperature}°C`);
+        }
+        
+        if (Math.abs(this.currentRelativeHumidity - newHumidity) > 1) {
+          this.currentRelativeHumidity = newHumidity;
+          this.humidityService.getCharacteristic(Characteristic.CurrentRelativeHumidity)
+            .updateValue(this.currentRelativeHumidity);
+          if (this.platform.debug) this.log.info(`${this.name}: Humidity updated to ${this.currentRelativeHumidity}%`);
+        }
       }
       
       // Get AC state
@@ -158,79 +212,84 @@ class SensiboAccessory {
       
       const acState = acStateResponse.data.result[0]?.acState;
       if (acState) {
-        this.targetTemperature = acState.targetTemperature || 20;
+        const newTargetTemp = acState.targetTemperature || 20;
+        if (this.targetTemperature !== newTargetTemp) {
+          this.targetTemperature = newTargetTemp;
+          this.thermostatService.getCharacteristic(Characteristic.TargetTemperature)
+            .updateValue(this.targetTemperature);
+          if (this.platform.debug) this.log.info(`${this.name}: Target temperature updated to ${this.targetTemperature}°C`);
+        }
+        
+        let newCurrentState, newTargetState;
         
         if (acState.on) {
           switch (acState.mode) {
             case 'cool':
-              this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.COOL;
-              this.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.COOL;
+              newCurrentState = Characteristic.CurrentHeatingCoolingState.COOL;
+              newTargetState = Characteristic.TargetHeatingCoolingState.COOL;
               break;
             case 'heat':
-              this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.HEAT;
-              this.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.HEAT;
+              newCurrentState = Characteristic.CurrentHeatingCoolingState.HEAT;
+              newTargetState = Characteristic.TargetHeatingCoolingState.HEAT;
               break;
             case 'auto':
-              this.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.AUTO;
+              newTargetState = Characteristic.TargetHeatingCoolingState.AUTO;
               if (this.currentTemperature < this.targetTemperature - 1) {
-                this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.HEAT;
+                newCurrentState = Characteristic.CurrentHeatingCoolingState.HEAT;
               } else if (this.currentTemperature > this.targetTemperature + 1) {
-                this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.COOL;
+                newCurrentState = Characteristic.CurrentHeatingCoolingState.COOL;
               } else {
-                this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.OFF;
+                newCurrentState = Characteristic.CurrentHeatingCoolingState.OFF;
               }
               break;
             default:
-              this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.OFF;
-              this.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.OFF;
+              newCurrentState = Characteristic.CurrentHeatingCoolingState.OFF;
+              newTargetState = Characteristic.TargetHeatingCoolingState.OFF;
           }
         } else {
-          this.currentHeatingCoolingState = Characteristic.CurrentHeatingCoolingState.OFF;
-          this.targetHeatingCoolingState = Characteristic.TargetHeatingCoolingState.OFF;
+          newCurrentState = Characteristic.CurrentHeatingCoolingState.OFF;
+          newTargetState = Characteristic.TargetHeatingCoolingState.OFF;
+        }
+        
+        // Update characteristics if values changed
+        if (this.currentHeatingCoolingState !== newCurrentState) {
+          this.currentHeatingCoolingState = newCurrentState;
+          this.thermostatService.getCharacteristic(Characteristic.CurrentHeatingCoolingState)
+            .updateValue(this.currentHeatingCoolingState);
+          if (this.platform.debug) this.log.info(`${this.name}: Current heating/cooling state updated`);
+        }
+        
+        if (this.targetHeatingCoolingState !== newTargetState) {
+          this.targetHeatingCoolingState = newTargetState;
+          this.thermostatService.getCharacteristic(Characteristic.TargetHeatingCoolingState)
+            .updateValue(this.targetHeatingCoolingState);
+          if (this.platform.debug) this.log.info(`${this.name}: Target heating/cooling state updated`);
         }
       }
-      
-      // Update characteristics
-      this.thermostatService.updateCharacteristic(Characteristic.CurrentTemperature, this.currentTemperature);
-      this.thermostatService.updateCharacteristic(Characteristic.TargetTemperature, this.targetTemperature);
-      this.thermostatService.updateCharacteristic(Characteristic.CurrentHeatingCoolingState, this.currentHeatingCoolingState);
-      this.thermostatService.updateCharacteristic(Characteristic.TargetHeatingCoolingState, this.targetHeatingCoolingState);
-      this.humidityService.updateCharacteristic(Characteristic.CurrentRelativeHumidity, this.currentRelativeHumidity);
-      
     } catch (error) {
       this.log.error(`Error updating device state for ${this.name}:`, error.message);
     }
   }
   
-  async sendACCommand(acState) {
-    try {
-      await axios.post(`${this.baseURL}/pods/${this.deviceId}/acStates`, {
-        acState: acState
-      }, {
-        params: { apiKey: this.apiKey },
-        headers: { 
-          'Accept-Encoding': 'gzip',
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      this.log.info(`Command sent to ${this.name}:`, acState);
-    } catch (error) {
-      this.log.error(`Error sending command to ${this.name}:`, error.message);
-      throw error;
+  mapACModeToHomeKit(mode) {
+    switch (mode) {
+      case 'cool': return Characteristic.TargetHeatingCoolingState.COOL;
+      case 'heat': return Characteristic.TargetHeatingCoolingState.HEAT;
+      case 'auto': return Characteristic.TargetHeatingCoolingState.AUTO;
+      default: return Characteristic.TargetHeatingCoolingState.OFF;
     }
   }
   
-  // Characteristic Handlers
-  getCurrentHeatingCoolingState(callback) {
-    callback(null, this.currentHeatingCoolingState);
+  // Characteristic handlers
+  getCurrentHeatingCoolingState() {
+    return this.currentHeatingCoolingState;
   }
   
-  getTargetHeatingCoolingState(callback) {
-    callback(null, this.targetHeatingCoolingState);
+  getTargetHeatingCoolingState() {
+    return this.targetHeatingCoolingState;
   }
   
-  async setTargetHeatingCoolingState(value, callback) {
+  async setTargetHeatingCoolingState(value) {
     try {
       let acState = {};
       
@@ -257,44 +316,72 @@ class SensiboAccessory {
       
       await this.sendACCommand(acState);
       this.targetHeatingCoolingState = value;
-      callback(null);
+      
+      if (this.platform.debug) {
+        this.log.info(`${this.name}: Set heating/cooling state to ${value}`);
+      }
     } catch (error) {
-      callback(error);
+      this.log.error(`Error setting heating/cooling state for ${this.name}:`, error.message);
+      throw error;
     }
   }
   
-  getCurrentTemperature(callback) {
-    callback(null, this.currentTemperature);
+  getCurrentTemperature() {
+    return this.currentTemperature;
   }
   
-  getTargetTemperature(callback) {
-    callback(null, this.targetTemperature);
+  getTargetTemperature() {
+    return this.targetTemperature;
   }
   
-  async setTargetTemperature(value, callback) {
+  async setTargetTemperature(value) {
     try {
       const acState = {
+        on: true,
         targetTemperature: value
       };
       
-      // Only send command if AC is on
-      if (this.targetHeatingCoolingState !== Characteristic.TargetHeatingCoolingState.OFF) {
-        await this.sendACCommand(acState);
-      }
-      
+      await this.sendACCommand(acState);
       this.targetTemperature = value;
-      callback(null);
+      
+      if (this.platform.debug) {
+        this.log.info(`${this.name}: Set target temperature to ${value}°C`);
+      }
     } catch (error) {
-      callback(error);
+      this.log.error(`Error setting target temperature for ${this.name}:`, error.message);
+      throw error;
     }
   }
   
-  getTemperatureDisplayUnits(callback) {
-    callback(null, Characteristic.TemperatureDisplayUnits.CELSIUS);
+  getTemperatureDisplayUnits() {
+    return Characteristic.TemperatureDisplayUnits.CELSIUS;
   }
   
-  getCurrentRelativeHumidity(callback) {
-    callback(null, this.currentRelativeHumidity);
+  getCurrentRelativeHumidity() {
+    return this.currentRelativeHumidity;
+  }
+  
+  async sendACCommand(acState) {
+    try {
+      const response = await axios.post(`${this.baseURL}/pods/${this.deviceId}/acStates`, {
+        acState: acState
+      }, {
+        params: { apiKey: this.apiKey },
+        headers: {
+          'Accept-Encoding': 'gzip',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (this.platform.debug) {
+        this.log.info(`${this.name}: AC command sent successfully`);
+      }
+      
+      return response.data;
+    } catch (error) {
+      this.log.error(`Error sending AC command for ${this.name}:`, error.message);
+      throw error;
+    }
   }
   
   getServices() {
