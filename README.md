@@ -1,16 +1,29 @@
 # Homebridge Sensibo Custom Plugin
 
-A custom Homebridge plugin for controlling Sensibo smart air conditioner devices through Apple HomeKit.
+A custom Homebridge plugin to control Sensibo air conditioning devices through Apple HomeKit. This plugin allows you to control your Sensibo devices using Siri, the Home app, and other HomeKit-compatible applications.
+
+## ⚠️ Important: Local Network Deployment Required
+
+**This plugin must run on your local network** (same WiFi as your iPhone/iPad) for HomeKit pairing to work. HomeKit uses mDNS discovery which only works on local networks.
+
+**Recommended Setup: Raspberry Pi** - The most popular and reliable way to run Homebridge 24/7.
 
 ## Features
 
-- **Full HomeKit Integration**: Control your Sensibo devices using Siri, Apple Home app, and other HomeKit-compatible apps
-- **Multiple Device Support**: Automatically discovers and manages all Sensibo devices in your account
-- **Temperature Control**: Set target temperature and view current temperature
-- **Humidity Monitoring**: View current humidity levels from your Sensibo sensors
-- **AC Mode Control**: Switch between heating, cooling, auto, and off modes
-- **Real-time Updates**: Polls device status every 30 seconds for up-to-date information
-- **Cloud Deployment Ready**: Designed to run on cloud services like Render
+- **Multiple Device Support**: Control multiple Sensibo devices from a single plugin
+- **Full HomeKit Integration**: Each device appears as a separate accessory in HomeKit
+- **Thermostat Control**: Set target temperature, switch between heating/cooling modes
+- **Humidity Monitoring**: View current humidity levels from your Sensibo devices
+- **Real-time Updates**: Automatic polling for device state changes
+- **Local Network Operation**: Runs reliably on your home network
+
+## Requirements
+
+- **Raspberry Pi** (recommended) or always-on computer on your local network
+- Node.js 18.15.0 or higher (Node.js 22 recommended)
+- Homebridge 1.3.0 or higher
+- Sensibo API key (get yours from [Sensibo Developer Portal](https://home.sensibo.com/me/api))
+- Active Sensibo devices connected to your account
 
 ## Installation
 
@@ -29,7 +42,7 @@ npm install -g homebridge
 
 2. Clone this repository:
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/yourusername/homebridge-sensibo-custom.git
 cd homebridge-sensibo-custom
 ```
 
@@ -57,8 +70,8 @@ cp config.json.example ~/.homebridge/config.json
     {
       "platform": "SensiboCustom",
       "name": "Sensibo Custom",
-      "apiKey": "YOUR_SENSIBO_API_KEY_HERE",
-      "pollingInterval": 30,
+      "apiKey": "YOUR_SENSIBO_API_KEY",
+      "pollingInterval": 30000,
       "debug": false
     }
   ]
@@ -67,13 +80,9 @@ cp config.json.example ~/.homebridge/config.json
 
 ### Configuration Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `platform` | string | `"SensiboCustom"` | Platform identifier (required) |
-| `name` | string | `"Sensibo Custom"` | Platform name |
-| `apiKey` | string | - | Your Sensibo API key (required) |
-| `pollingInterval` | number | `30` | How often to check for updates (seconds) |
-| `debug` | boolean | `false` | Enable debug logging |
+- `apiKey` (required): Your Sensibo API key from the developer portal
+- `pollingInterval` (optional): Device status check interval in milliseconds (default: 30000)
+- `debug` (optional): Enable detailed logging (default: false)
 
 ## Usage
 
@@ -96,36 +105,66 @@ npm start
 3. Scan the QR code displayed in the Homebridge logs
 4. Your Sensibo devices will appear as separate accessories
 
-### Voice Control Examples
+### HomeKit Pairing
 
-- "Hey Siri, set the living room temperature to 22 degrees"
-- "Hey Siri, turn on the bedroom air conditioner"
-- "Hey Siri, what's the temperature in the office?"
-- "Hey Siri, turn off all air conditioners"
+### Step 5: Pair with HomeKit
 
-## Cloud Deployment
+1. **Start Homebridge**:
+   ```bash
+   # Start Homebridge (will run in foreground)
+   homebridge
+   
+   # Or start as a service (recommended)
+   sudo systemctl enable homebridge
+   sudo systemctl start homebridge
+   ```
 
-This plugin is designed to run on cloud services like Render, Railway, or Heroku.
+2. **Find the QR Code**: Look in the Homebridge logs for a QR code and PIN
 
-### Render Deployment
+3. **Scan with iPhone**: 
+   - Open the Home app on your iPhone/iPad
+   - Tap the "+" button
+   - Select "Add Accessory"
+   - Scan the QR code from the logs
+   - Enter the PIN if prompted
 
-1. Fork this repository to your GitHub account
-2. Create a new Web Service on Render
-3. Connect your GitHub repository
-4. Set the following:
-   - **Build Command**: `npm install`
-   - **Start Command**: `homebridge -I`
-   - **Environment Variables**:
-     - `SENSIBO_API_KEY`: Your Sensibo API key
-     - `NODE_ENV`: `production`
+4. **Your Sensibo devices will appear** as separate accessories in HomeKit!
 
-### Environment Variables
+### Troubleshooting Pairing
 
-For cloud deployment, you can use environment variables instead of a config file:
+- **"Accessory Not Found"**: Make sure your iPhone and Raspberry Pi are on the same WiFi network
+- **QR Code Not Working**: Try entering the PIN manually in the Home app
+- **No Devices Found**: Check your Sensibo API key and internet connection
 
-- `SENSIBO_API_KEY`: Your Sensibo API key
-- `POLLING_INTERVAL`: Polling interval in seconds (optional, default: 30)
-- `DEBUG`: Set to `true` to enable debug logging (optional)
+## Local Development & Testing
+
+### Testing Your Setup
+
+1. **Clone this repository**:
+   ```bash
+   git clone https://github.com/yourusername/homebridge-sensibo-custom.git
+   cd homebridge-sensibo-custom
+   ```
+
+2. **Install dependencies**:
+   ```bash
+   npm install
+   ```
+
+3. **Create `.env` file**:
+   ```bash
+   echo "SENSIBO_API_KEY=your_api_key_here" > .env
+   ```
+
+4. **Test the plugin**:
+   ```bash
+   npm test
+   ```
+
+5. **Run local HomeKit test**:
+   ```bash
+   node test-homekit.js
+   ```
 
 ## Supported Devices
 
@@ -194,16 +233,6 @@ The Sensibo API has rate limits. This plugin:
 
 ## License
 
-This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0) - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
 
-This means:
-- ✅ You can use, modify, and distribute this software
-- ✅ You must provide source code for any modifications
-- ⚠️ If you run this software on a server/network service, you must make the source code available to users
-- ✅ Any derivative works must also be licensed under AGPL-3.0
-
-## Support
-
-- Create an issue on GitHub for bugs or feature requests
-- Check the Homebridge community forums for general help
-- Refer to the Sensibo API documentation for API-related questions
+See the [LICENSE](LICENSE) file for details.
